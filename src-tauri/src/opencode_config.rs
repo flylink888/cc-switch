@@ -46,9 +46,20 @@ fn canonicalize_plugin_name(plugin_name: &str) -> String {
     plugin_name.to_string()
 }
 
+/// Resolve OpenCode's config directory using the same precedence documented
+/// for the app: CC Switch override, OPENCODE_CONFIG_DIR, XDG_CONFIG_HOME,
+/// then the platform-independent ~/.config/opencode default.
 pub fn get_opencode_dir() -> PathBuf {
     if let Some(override_dir) = get_opencode_override_dir() {
         return override_dir;
+    }
+
+    if let Some(config_dir) = non_empty_env_path("OPENCODE_CONFIG_DIR") {
+        return config_dir;
+    }
+
+    if let Some(xdg_config_dir) = opencode_xdg_config_dir() {
+        return xdg_config_dir;
     }
 
     crate::config::get_home_dir()
@@ -56,7 +67,27 @@ pub fn get_opencode_dir() -> PathBuf {
         .join("opencode")
 }
 
+fn non_empty_env_path(key: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(key)?;
+    let path = PathBuf::from(value);
+    (!path.as_os_str().is_empty()).then_some(path)
+}
+
+fn opencode_xdg_config_dir() -> Option<PathBuf> {
+    // Flatpak rewrites XDG_CONFIG_HOME to its private sandbox directory. OpenCode
+    // normally runs on the host, so keep using the host's ~/.config in that case.
+    if Path::new("/.flatpak-info").is_file() {
+        return None;
+    }
+    non_empty_env_path("XDG_CONFIG_HOME").map(|path| path.join("opencode"))
+}
+
 pub fn get_opencode_config_path() -> Result<PathBuf, AppError> {
+    if get_opencode_override_dir().is_none() {
+        if let Some(config_path) = non_empty_env_path("OPENCODE_CONFIG") {
+            return Ok(config_path);
+        }
+    }
     resolve_config_path(&get_opencode_dir())
 }
 
@@ -705,12 +736,30 @@ fn remove_plugins(config: &mut Value, prefixes: &[&str]) {
 mod tests {
     use super::*;
 
-    struct TestHomeGuard(Option<std::ffi::OsString>, crate::settings::AppSettings);
+    struct TestHomeGuard(
+        Option<std::ffi::OsString>,
+        crate::settings::AppSettings,
+        Option<std::ffi::OsString>,
+        Option<std::ffi::OsString>,
+        Option<std::ffi::OsString>,
+    );
     impl TestHomeGuard {
         fn set(home: &std::path::Path) -> Self {
             let previous_env = std::env::var_os("CC_SWITCH_TEST_HOME");
+            let previous_opencode_config_dir = std::env::var_os("OPENCODE_CONFIG_DIR");
+            let previous_opencode_config = std::env::var_os("OPENCODE_CONFIG");
+            let previous_xdg_config_home = std::env::var_os("XDG_CONFIG_HOME");
             std::env::set_var("CC_SWITCH_TEST_HOME", home);
-            let guard = Self(previous_env, crate::settings::get_settings());
+            std::env::remove_var("OPENCODE_CONFIG_DIR");
+            std::env::remove_var("OPENCODE_CONFIG");
+            std::env::remove_var("XDG_CONFIG_HOME");
+            let guard = Self(
+                previous_env,
+                crate::settings::get_settings(),
+                previous_opencode_config_dir,
+                previous_opencode_config,
+                previous_xdg_config_home,
+            );
             crate::settings::update_settings(Default::default()).unwrap();
             guard
         }
@@ -722,7 +771,127 @@ mod tests {
                 Some(value) => std::env::set_var("CC_SWITCH_TEST_HOME", value),
                 None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
             }
+            match self.2.take() {
+                Some(value) => std::env::set_var("OPENCODE_CONFIG_DIR", value),
+                None => std::env::remove_var("OPENCODE_CONFIG_DIR"),
+            }
+            match self.3.take() {
+                Some(value) => std::env::set_var("OPENCODE_CONFIG", value),
+                None => std::env::remove_var("OPENCODE_CONFIG"),
+            }
+            match self.4.take() {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
         }
+    }
+
+    struct TestEnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl TestEnvGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value.as_os_str());
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_config_dir_env_overrides_the_default_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let _home = TestHomeGuard::set(temp.path());
+        let _xdg = TestEnvGuard::remove("XDG_CONFIG_HOME");
+        let _config = TestEnvGuard::remove("OPENCODE_CONFIG");
+        let env_dir = temp.path().join("custom-opencode");
+        let _config_dir = TestEnvGuard::set("OPENCODE_CONFIG_DIR", &env_dir);
+
+        assert_eq!(get_opencode_dir(), env_dir);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn explicit_opencode_directory_overrides_the_environment() {
+        let temp = tempfile::tempdir().unwrap();
+        let _home = TestHomeGuard::set(temp.path());
+        let _xdg = TestEnvGuard::remove("XDG_CONFIG_HOME");
+        let _config = TestEnvGuard::remove("OPENCODE_CONFIG");
+        let env_dir = temp.path().join("env-opencode");
+        let _config_dir = TestEnvGuard::set("OPENCODE_CONFIG_DIR", &env_dir);
+        let override_dir = temp.path().join("settings-opencode");
+        crate::settings::update_settings(crate::settings::AppSettings {
+            opencode_config_dir: Some(override_dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(get_opencode_dir(), override_dir);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn xdg_config_home_is_used_when_opencode_config_dir_is_unset() {
+        let temp = tempfile::tempdir().unwrap();
+        let _home = TestHomeGuard::set(temp.path());
+        let _config_dir = TestEnvGuard::remove("OPENCODE_CONFIG_DIR");
+        let _config = TestEnvGuard::remove("OPENCODE_CONFIG");
+        let xdg_dir = temp.path().join("xdg-config");
+        let _xdg = TestEnvGuard::set("XDG_CONFIG_HOME", &xdg_dir);
+
+        assert_eq!(get_opencode_dir(), xdg_dir.join("opencode"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_config_env_selects_the_config_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let _home = TestHomeGuard::set(temp.path());
+        let _xdg = TestEnvGuard::remove("XDG_CONFIG_HOME");
+        let _config_dir = TestEnvGuard::remove("OPENCODE_CONFIG_DIR");
+        let config_path = temp.path().join("custom").join("config.jsonc");
+        let _config = TestEnvGuard::set("OPENCODE_CONFIG", &config_path);
+
+        assert_eq!(get_opencode_config_path().unwrap(), config_path);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn explicit_opencode_directory_overrides_opencode_config_file_env() {
+        let temp = tempfile::tempdir().unwrap();
+        let _home = TestHomeGuard::set(temp.path());
+        let _xdg = TestEnvGuard::remove("XDG_CONFIG_HOME");
+        let _config_dir = TestEnvGuard::remove("OPENCODE_CONFIG_DIR");
+        let env_config = temp.path().join("env-opencode.json");
+        let _config = TestEnvGuard::set("OPENCODE_CONFIG", &env_config);
+        let override_dir = temp.path().join("settings-opencode");
+        crate::settings::update_settings(crate::settings::AppSettings {
+            opencode_config_dir: Some(override_dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            get_opencode_config_path().unwrap(),
+            override_dir.join("opencode.json")
+        );
     }
 
     fn write_config(home: &std::path::Path, content: &str) {

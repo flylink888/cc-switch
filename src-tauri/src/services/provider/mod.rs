@@ -203,8 +203,9 @@ mod tests {
         original_local_app_data: Option<String>,
         original_userprofile: Option<String>,
         original_test_home: Option<String>,
-        #[cfg(target_os = "linux")]
         original_xdg_config_home: Option<std::ffi::OsString>,
+        original_opencode_config_dir: Option<std::ffi::OsString>,
+        original_opencode_config: Option<std::ffi::OsString>,
     }
 
     impl TempHome {
@@ -215,17 +216,18 @@ mod tests {
             let original_local_app_data = env::var("LOCALAPPDATA").ok();
             let original_userprofile = env::var("USERPROFILE").ok();
             let original_test_home = env::var("CC_SWITCH_TEST_HOME").ok();
-            #[cfg(target_os = "linux")]
             let original_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+            let original_opencode_config_dir = env::var_os("OPENCODE_CONFIG_DIR");
+            let original_opencode_config = env::var_os("OPENCODE_CONFIG");
 
             env::set_var("HOME", dir.path());
             #[cfg(windows)]
             env::set_var("LOCALAPPDATA", dir.path().join("AppData").join("Local"));
             env::set_var("USERPROFILE", dir.path());
             env::set_var("CC_SWITCH_TEST_HOME", dir.path());
-            // Claude Desktop Linux paths follow XDG_CONFIG_HOME; pin them under the temp home.
-            #[cfg(target_os = "linux")]
             env::remove_var("XDG_CONFIG_HOME");
+            env::remove_var("OPENCODE_CONFIG_DIR");
+            env::remove_var("OPENCODE_CONFIG");
 
             Self {
                 dir,
@@ -234,8 +236,9 @@ mod tests {
                 original_local_app_data,
                 original_userprofile,
                 original_test_home,
-                #[cfg(target_os = "linux")]
                 original_xdg_config_home,
+                original_opencode_config_dir,
+                original_opencode_config,
             }
         }
     }
@@ -265,12 +268,17 @@ mod tests {
                 None => env::remove_var("CC_SWITCH_TEST_HOME"),
             }
 
-            #[cfg(target_os = "linux")]
-            {
-                match &self.original_xdg_config_home {
-                    Some(value) => env::set_var("XDG_CONFIG_HOME", value),
-                    None => env::remove_var("XDG_CONFIG_HOME"),
-                }
+            match &self.original_xdg_config_home {
+                Some(value) => env::set_var("XDG_CONFIG_HOME", value),
+                None => env::remove_var("XDG_CONFIG_HOME"),
+            }
+            match &self.original_opencode_config_dir {
+                Some(value) => env::set_var("OPENCODE_CONFIG_DIR", value),
+                None => env::remove_var("OPENCODE_CONFIG_DIR"),
+            }
+            match &self.original_opencode_config {
+                Some(value) => env::set_var("OPENCODE_CONFIG", value),
+                None => env::remove_var("OPENCODE_CONFIG"),
             }
         }
     }
@@ -313,8 +321,14 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let old_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
         let old_home = std::env::var_os("HOME");
+        let old_xdg_config_home = std::env::var_os("XDG_CONFIG_HOME");
+        let old_opencode_config_dir = std::env::var_os("OPENCODE_CONFIG_DIR");
+        let old_opencode_config = std::env::var_os("OPENCODE_CONFIG");
         std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
         std::env::set_var("HOME", temp.path());
+        std::env::remove_var("XDG_CONFIG_HOME");
+        std::env::remove_var("OPENCODE_CONFIG_DIR");
+        std::env::remove_var("OPENCODE_CONFIG");
 
         let db = Arc::new(Database::memory().expect("in-memory database"));
         let state = AppState::new(db);
@@ -327,6 +341,18 @@ mod tests {
         match old_home {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
+        }
+        match old_xdg_config_home {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        match old_opencode_config_dir {
+            Some(value) => std::env::set_var("OPENCODE_CONFIG_DIR", value),
+            None => std::env::remove_var("OPENCODE_CONFIG_DIR"),
+        }
+        match old_opencode_config {
+            Some(value) => std::env::set_var("OPENCODE_CONFIG", value),
+            None => std::env::remove_var("OPENCODE_CONFIG"),
         }
 
         result

@@ -23,12 +23,21 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let previous_env = ["CC_SWITCH_TEST_HOME", "OPENCODE_DB"]
+        let previous_env: Vec<(&'static str, Option<OsString>)> = [
+            "CC_SWITCH_TEST_HOME",
+            "OPENCODE_DB",
+            "OPENCODE_CONFIG_DIR",
+            "OPENCODE_CONFIG",
+            "XDG_CONFIG_HOME",
+        ]
             .into_iter()
             .map(|key| (key, std::env::var_os(key)))
             .collect();
         std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
         std::env::set_var("OPENCODE_DB", dir.path().join("opencode.db"));
+        std::env::remove_var("OPENCODE_CONFIG_DIR");
+        std::env::remove_var("OPENCODE_CONFIG");
+        std::env::remove_var("XDG_CONFIG_HOME");
         let previous_settings = get_settings();
         let config_dir = dir.path().join("opencode");
         fs::create_dir_all(&config_dir).unwrap();
@@ -178,6 +187,37 @@ fn opencode_builtin_incomplete_copies_cannot_be_added_to_live() {
     assert!(opencode_config::get_providers()
         .unwrap()
         .contains_key("custom-copy"));
+}
+
+#[test]
+#[serial]
+fn additive_add_writes_provider_to_live_config() {
+    let fixture = Fixture::new();
+    let provider = Provider::with_id(
+        "custom-new".into(),
+        "New provider".into(),
+        json!({"npm": "@ai-sdk/openai-compatible", "models": {"glm-5": {"name": "GLM 5"}}}),
+        None,
+    );
+
+    ProviderService::add(&fixture.state, AppType::OpenCode, provider, true).unwrap();
+
+    assert!(opencode_config::get_providers()
+        .unwrap()
+        .contains_key("custom-new"));
+    let saved = fixture
+        .state
+        .db
+        .get_provider_by_id("custom-new", "opencode")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        saved
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.live_config_managed),
+        Some(true)
+    );
 }
 
 #[test]
