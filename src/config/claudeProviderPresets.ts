@@ -57,6 +57,8 @@ export interface ProviderPreset extends PresetFamilyFields {
     | "openai_chat"
     | "openai_responses"
     | "gemini_native";
+  // 严格 Anthropic Messages 兼容模式；预设需要时由表单写入 meta。
+  strictAnthropicMessages?: boolean;
 
   // 供应商类型标识（用于特殊供应商检测）
   // - "github_copilot": GitHub Copilot 供应商（需要 OAuth 认证）

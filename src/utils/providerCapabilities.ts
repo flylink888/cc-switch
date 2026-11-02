@@ -188,8 +188,13 @@ export function providerNeedsRouting(
 
   if (appId === "claude") {
     const fmt = provider.meta?.apiFormat;
-    // Claude 原生是 Anthropic 格式，任何非 anthropic 格式都需要代理转换。
-    return provider.meta?.isFullUrl === true || (!!fmt && fmt !== "anthropic");
+    // Claude 原生是 Anthropic 格式；严格模式虽然协议相同，仍需要代理做
+    // system 消息规范化。完整 URL 与其他格式同样需要路由。
+    return (
+      provider.meta?.strictAnthropicMessages === true ||
+      provider.meta?.isFullUrl === true ||
+      (!!fmt && fmt !== "anthropic")
+    );
   }
 
   if (appId === "codex" || appId === "grokbuild") {

@@ -538,6 +538,13 @@ pub struct ProviderMeta {
     /// - "openai_responses": OpenAI Responses API 格式，需要转换
     #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
+    /// Claude Messages 严格模式：为 true 时必须经过本地路由，把 messages[]
+    /// 内的 system 条目合并到顶层 system 字段。缺省保持原生透传。
+    #[serde(
+        rename = "strictAnthropicMessages",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub strict_anthropic_messages: Option<bool>,
     /// Codex Copilot only: absent or auto prefers advertised Responses, then Chat.
     /// Legacy `apiFormat` does not imply an explicit Copilot protocol override.
     #[serde(

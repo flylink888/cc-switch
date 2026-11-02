@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderForm } from "@/components/providers/forms/ProviderForm";
@@ -62,13 +62,14 @@ function renderClaude(
   baseUrl = "https://relay.example",
   extraEnv: Record<string, string> = {},
 ) {
-  return render(
+  const onSubmit = vi.fn();
+  const view = render(
     <QueryClientProvider client={createTestQueryClient()}>
       <ProviderForm
         appId="claude"
         providerId="relay"
         submitLabel="save-provider"
-        onSubmit={vi.fn()}
+        onSubmit={onSubmit}
         onCancel={vi.fn()}
         initialData={{
           name: "Relay",
@@ -86,6 +87,7 @@ function renderClaude(
       />
     </QueryClientProvider>,
   );
+  return { ...view, onSubmit };
 }
 
 /** 有已配置的高级值时高级区会自动展开，只在折叠时点开，免得点一下反而收起。 */
@@ -144,6 +146,34 @@ describe("完整表单按实际模式提示（Claude Code）", () => {
 
     expect(screen.getByText(SWITCH)).toBeInTheDocument();
     expect(screen.queryByText(IN_USE)).toBeNull();
+  });
+
+  it("严格 Anthropic Messages 模式在直连时也提示需要路由", () => {
+    modeState.directProviderId = "relay";
+    renderClaude({
+      apiFormat: "anthropic",
+      strictAnthropicMessages: true,
+    });
+
+    expect(screen.getByText(IN_USE)).toBeInTheDocument();
+  });
+
+  it("严格 Anthropic Messages 模式保存为原生协议加规范化标记", async () => {
+    modeState.mode = "route";
+    const { onSubmit } = renderClaude({
+      apiFormat: "anthropic",
+      strictAnthropicMessages: true,
+    });
+    expandClaudeAdvanced();
+
+    fireEvent.click(screen.getByRole("button", { name: "save-provider" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.meta).toMatchObject({
+      apiFormat: "anthropic",
+      strictAnthropicMessages: true,
+    });
   });
 
   it("路由模式下不提示格式后果，兜底模型按路由说明", () => {

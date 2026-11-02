@@ -56,6 +56,16 @@ export function getRoutingReason(
       proxyRequiredReason = t("notifications.proxyReasonManagedOAuth", {
         defaultValue: "使用托管 OAuth 登录（令牌由本地路由注入）",
       });
+    } else if (
+      app === "claude" &&
+      provider.meta?.strictAnthropicMessages === true
+    ) {
+      proxyRequiredReason = t(
+        "notifications.proxyReasonStrictAnthropicMessages",
+        {
+          defaultValue: "使用严格 Anthropic Messages 兼容模式",
+        },
+      );
     } else if (provider.meta?.apiFormat === "openai_chat" && app === "claude") {
       proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
         defaultValue: "使用 OpenAI Chat 接口格式",

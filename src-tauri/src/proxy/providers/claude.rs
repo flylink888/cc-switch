@@ -237,7 +237,103 @@ pub fn normalize_anthropic_messages_for_provider(
     let mut changed =
         normalize_anthropic_tool_thinking_history_for_provider(body, provider, api_format);
     changed |= normalize_deepseek_thinking_disabled_strip_effort(body, provider);
+    changed |= normalize_strict_anthropic_system_messages_for_provider(
+        body, provider, api_format,
+    );
     changed
+}
+
+/// Strict Anthropic Messages compatibility: move every inline `role=system`
+/// entry into the top-level `system` field. This is opt-in per provider because
+/// the rewrite changes the request prefix and can affect upstream prompt caching.
+pub fn normalize_strict_anthropic_system_messages_for_provider(
+    body: &mut Value,
+    provider: &Provider,
+    api_format: &str,
+) -> bool {
+    if api_format.trim() != "anthropic"
+        || provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.strict_anthropic_messages)
+            != Some(true)
+    {
+        return false;
+    }
+
+    let moved = normalize_anthropic_system_role_messages(body);
+    if moved > 0 {
+        log::debug!(
+            "[Claude] Hoisted {moved} inline system message(s) for strict Anthropic Messages provider={}",
+            provider.id
+        );
+    }
+    moved > 0
+}
+
+fn normalize_anthropic_system_role_messages(body: &mut Value) -> usize {
+    let mut system_parts = Vec::new();
+    let moved = {
+        let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+            return 0;
+        };
+
+        let original_len = messages.len();
+        let mut kept_messages = Vec::with_capacity(original_len);
+        for message in std::mem::take(messages) {
+            if message.get("role").and_then(Value::as_str) == Some("system") {
+                if let Some(content) = message.get("content") {
+                    append_anthropic_system_parts(content, &mut system_parts);
+                }
+            } else {
+                kept_messages.push(message);
+            }
+        }
+
+        *messages = kept_messages;
+        original_len - messages.len()
+    };
+
+    if moved == 0 || system_parts.is_empty() {
+        return moved;
+    }
+
+    let mut merged_parts = Vec::new();
+    if let Some(existing) = body.get("system") {
+        append_anthropic_system_parts(existing, &mut merged_parts);
+    }
+    merged_parts.extend(system_parts);
+
+    if !merged_parts.is_empty() {
+        body["system"] = Value::Array(merged_parts);
+    }
+
+    moved
+}
+
+fn append_anthropic_system_parts(content: &Value, parts: &mut Vec<Value>) {
+    match content {
+        Value::String(text) if !text.trim().is_empty() => {
+            parts.push(json!({
+                "type": "text",
+                "text": text
+            }));
+        }
+        Value::Array(items) => {
+            for item in items {
+                append_anthropic_system_parts(item, parts);
+            }
+        }
+        Value::Object(obj)
+            if obj
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty()) =>
+        {
+            parts.push(Value::Object(obj.clone()));
+        }
+        _ => {}
+    }
 }
 
 fn normalize_anthropic_tool_thinking_history(body: &mut Value) -> bool {
@@ -2542,6 +2638,54 @@ mod tests {
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[2]["role"], "system");
         assert_eq!(body["system"], "Existing top-level system.");
+    }
+
+    #[test]
+    fn test_strict_anthropic_messages_hoists_system_role_messages() {
+        let provider = create_provider_with_meta(
+            json!({
+                "env": {
+                    "ANTHROPIC_BASE_URL": "https://api.commandcode.ai/provider",
+                    "ANTHROPIC_AUTH_TOKEN": "test-key"
+                }
+            }),
+            ProviderMeta {
+                api_format: Some("anthropic".to_string()),
+                strict_anthropic_messages: Some(true),
+                ..Default::default()
+            },
+        );
+        let mut body = json!({
+            "system": "Existing top-level system.",
+            "model": "deepseek/deepseek-v4.1-flash",
+            "messages": [
+                { "role": "user", "content": "hello" },
+                { "role": "system", "content": "Message system one." },
+                {
+                    "role": "system",
+                    "content": [{
+                        "type": "text",
+                        "text": "Message system two.",
+                        "cache_control": { "type": "ephemeral" }
+                    }]
+                },
+                { "role": "assistant", "content": "hi" }
+            ]
+        });
+
+        let changed =
+            normalize_anthropic_messages_for_provider(&mut body, &provider, "anthropic");
+
+        assert!(changed);
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        let system = body["system"].as_array().unwrap();
+        assert_eq!(system[0]["text"], "Existing top-level system.");
+        assert_eq!(system[1]["text"], "Message system one.");
+        assert_eq!(system[2]["text"], "Message system two.");
+        assert_eq!(system[2]["cache_control"]["type"], "ephemeral");
     }
 
     #[test]

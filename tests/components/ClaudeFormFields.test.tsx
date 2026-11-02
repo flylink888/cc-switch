@@ -7,7 +7,15 @@ import {
 } from "@testing-library/react";
 import type { ComponentProps, PropsWithChildren } from "react";
 import { useForm } from "react-hook-form";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { ClaudeFormFields } from "@/components/providers/forms/ClaudeFormFields";
 import { Form } from "@/components/ui/form";
 
@@ -96,6 +104,8 @@ const renderCopilotForm = (overrides: Partial<ClaudeFormFieldsProps> = {}) => {
     speedTestEndpoints: [],
     apiFormat: "anthropic",
     onApiFormatChange: vi.fn(),
+    strictAnthropicMessages: false,
+    onStrictAnthropicMessagesChange: vi.fn(),
     reasoningEffort: "auto",
     onReasoningEffortChange: vi.fn(),
     apiKeyField: "ANTHROPIC_AUTH_TOKEN",
@@ -130,6 +140,30 @@ const renderCodexOauthForm = (overrides: Partial<ClaudeFormFieldsProps> = {}) =>
   });
 
 describe("ClaudeFormFields", () => {
+  const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollIntoView",
+  );
+
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
+
+  afterAll(() => {
+    if (scrollIntoViewDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollIntoView",
+        scrollIntoViewDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
+  });
+
   beforeEach(() => {
     copilotApiMock.copilotGetModels.mockResolvedValue([]);
     copilotApiMock.copilotGetModelsForAccount.mockResolvedValue([]);
@@ -163,9 +197,7 @@ describe("ClaudeFormFields", () => {
         isCopilotPreset: false,
         apiFormat: "openai_chat",
       });
-      expect(
-        screen.getByRole("combobox", { name: "思考档位" }),
-      ).toBeVisible();
+      expect(screen.getByRole("combobox", { name: "思考档位" })).toBeVisible();
       unmount();
 
       renderCopilotForm({
@@ -180,6 +212,50 @@ describe("ClaudeFormFields", () => {
   it("Copilot 卡不显示思考档位", () => {
     renderCopilotForm({ apiFormat: "openai_chat" });
     expect(screen.queryByRole("combobox", { name: "思考档位" })).toBeNull();
+  });
+
+  it("提供需要路由的严格 Anthropic Messages 选项", async () => {
+    renderCopilotForm({
+      isCopilotPreset: false,
+      category: "third_party",
+      usesOAuth: false,
+      shouldShowApiKey: true,
+    });
+
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "上游格式" }), {
+      key: "ArrowDown",
+    });
+
+    expect(
+      await screen.findByRole("option", {
+        name: "Anthropic Messages（严格兼容，需路由）",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("选择严格模式会保持 Anthropic 协议并打开规范化标记", async () => {
+    const onApiFormatChange = vi.fn();
+    const onStrictAnthropicMessagesChange = vi.fn();
+    renderCopilotForm({
+      isCopilotPreset: false,
+      category: "third_party",
+      usesOAuth: false,
+      shouldShowApiKey: true,
+      onApiFormatChange,
+      onStrictAnthropicMessagesChange,
+    });
+
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "上游格式" }), {
+      key: "ArrowDown",
+    });
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "Anthropic Messages（严格兼容，需路由）",
+      }),
+    );
+
+    expect(onApiFormatChange).toHaveBeenCalledWith("anthropic");
+    expect(onStrictAnthropicMessagesChange).toHaveBeenCalledWith(true);
   });
 
   it("点击获取模型列表后才请求当前 Copilot 账号的模型", async () => {

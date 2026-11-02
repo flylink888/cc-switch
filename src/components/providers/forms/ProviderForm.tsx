@@ -623,8 +623,21 @@ function ProviderFormFull({
     return initialData?.meta?.apiFormat ?? "anthropic";
   });
 
+  const [localStrictAnthropicMessages, setLocalStrictAnthropicMessages] =
+    useState(() => {
+      if (appId !== "claude") return false;
+      const format = initialData?.meta?.apiFormat;
+      return (
+        initialData?.meta?.strictAnthropicMessages === true &&
+        (!format || format === "anthropic")
+      );
+    });
+
   const handleApiFormatChange = useCallback((format: ClaudeApiFormat) => {
     setLocalApiFormat(format);
+    if (format !== "anthropic") {
+      setLocalStrictAnthropicMessages(false);
+    }
   }, []);
 
   const handleApiKeyFieldChange = useCallback(
@@ -2078,6 +2091,13 @@ function ProviderFormFull({
               ? "openai_responses"
               : localCodexApiFormat
             : undefined,
+      strictAnthropicMessages:
+        appId === "claude" &&
+        category !== "official" &&
+        localApiFormat === "anthropic" &&
+        localStrictAnthropicMessages
+          ? true
+          : undefined,
       codexCopilotApiFormat:
         appId === "codex" &&
         isCopilotProvider &&
@@ -2251,6 +2271,9 @@ function ProviderFormFull({
     if (value === "custom") {
       setActivePreset(null);
       form.reset(defaultValues);
+      if (appId === "claude") {
+        setLocalStrictAnthropicMessages(false);
+      }
 
       if (appId === "codex") {
         const template = getCodexCustomTemplate();
@@ -2440,6 +2463,10 @@ function ProviderFormFull({
     } else {
       setLocalApiFormat("anthropic");
     }
+    setLocalStrictAnthropicMessages(
+      preset.strictAnthropicMessages === true &&
+        (preset.apiFormat ?? "anthropic") === "anthropic",
+    );
     setClaudeReasoningEffort("auto");
 
     setLocalApiKeyField(preset.apiKeyField ?? "ANTHROPIC_AUTH_TOKEN");
@@ -2760,6 +2787,8 @@ function ProviderFormFull({
               speedTestEndpoints={speedTestEndpoints}
               apiFormat={localApiFormat}
               onApiFormatChange={handleApiFormatChange}
+              strictAnthropicMessages={localStrictAnthropicMessages}
+              onStrictAnthropicMessagesChange={setLocalStrictAnthropicMessages}
               reasoningEffort={claudeReasoningEffort}
               onReasoningEffortChange={setClaudeReasoningEffort}
               apiKeyField={localApiKeyField}

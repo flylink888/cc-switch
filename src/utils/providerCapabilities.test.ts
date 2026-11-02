@@ -335,6 +335,20 @@ describe("providerNeedsRouting", () => {
       ).toBe(false);
     });
 
+    it("Anthropic 严格兼容模式即使协议相同也需要路由", () => {
+      expect(
+        providerNeedsRouting(
+          "claude",
+          mkProvider({
+            meta: {
+              apiFormat: "anthropic",
+              strictAnthropicMessages: true,
+            },
+          }),
+        ),
+      ).toBe(true);
+    });
+
     it("apiFormat 缺省视为原生直连，不需要路由", () => {
       expect(providerNeedsRouting("claude", mkProvider({ meta: {} }))).toBe(
         false,

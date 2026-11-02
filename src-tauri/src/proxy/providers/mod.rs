@@ -58,8 +58,9 @@ pub use adapter::ProviderAdapter;
 pub use auth::{AuthInfo, AuthStrategy};
 pub use claude::{
     claude_api_format_needs_transform, get_claude_api_format,
-    normalize_anthropic_messages_for_provider, transform_claude_request_for_api_format,
-    ClaudeAdapter,
+    normalize_anthropic_messages_for_provider,
+    normalize_strict_anthropic_system_messages_for_provider,
+    transform_claude_request_for_api_format, ClaudeAdapter,
 };
 pub use codex::CodexAdapter;
 pub use codex::{

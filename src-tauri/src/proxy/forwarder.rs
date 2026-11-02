@@ -2080,6 +2080,20 @@ impl RequestForwarder {
                 }
             }
         }
+        // Body overrides run after the early format normalizers. Re-apply the
+        // opt-in strict system rewrite so an override cannot reintroduce a
+        // role=system entry rejected by strict Anthropic Messages gateways.
+        if adapter.name() == "Claude" {
+            if let Some(api_format) = resolved_claude_api_format.as_deref() {
+                if super::providers::normalize_strict_anthropic_system_messages_for_provider(
+                    &mut filtered_body,
+                    provider,
+                    api_format,
+                ) {
+                    filtered_body = prepare_upstream_request_body(filtered_body);
+                }
+            }
+        }
         // 出站 body 定稿后刷新真值（覆盖 Codex chat 上游模型覆写、转换层模型改写）
         if let Some(m) = filtered_body
             .get("model")

@@ -200,6 +200,10 @@ export interface ProviderMeta {
     | "openai_chat"
     | "openai_responses"
     | "gemini_native";
+  // Anthropic Messages compatibility: keep inline system messages unchanged by
+  // default; strict mode routes through CC Switch and hoists them to the
+  // top-level `system` field before forwarding.
+  strictAnthropicMessages?: boolean;
   // Managed Codex Copilot uses this instead of apiFormat. Missing/unknown means auto.
   // Keep the raw string so selections from newer versions survive an edit/save.
   codexCopilotApiFormat?: string;

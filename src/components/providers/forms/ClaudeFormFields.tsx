@@ -156,6 +156,8 @@ interface ClaudeFormFieldsProps {
   // API Format (for Claude-compatible providers that need request/response conversion)
   apiFormat: ClaudeApiFormat;
   onApiFormatChange: (format: ClaudeApiFormat) => void;
+  strictAnthropicMessages: boolean;
+  onStrictAnthropicMessagesChange: (enabled: boolean) => void;
   // 转成 OpenAI Chat / Responses 时思考档位的发法
   reasoningEffort: ClaudeReasoningEffortChoice;
   onReasoningEffortChange: (value: ClaudeReasoningEffortChoice) => void;
@@ -242,6 +244,8 @@ export function ClaudeFormFields({
   speedTestEndpoints,
   apiFormat,
   onApiFormatChange,
+  strictAnthropicMessages,
+  onStrictAnthropicMessagesChange,
   reasoningEffort,
   onReasoningEffortChange,
   apiKeyField,
@@ -270,7 +274,9 @@ export function ClaudeFormFields({
     defaultOpusModel ||
     defaultFableModel ||
     subagentModel ||
-    (!isXaiOauthPreset && !isCodexOauthPreset && apiFormat !== "anthropic") ||
+    (!isXaiOauthPreset &&
+      !isCodexOauthPreset &&
+      (apiFormat !== "anthropic" || strictAnthropicMessages)) ||
     reasoningEffort !== "auto" ||
     apiKeyField !== "ANTHROPIC_AUTH_TOKEN" ||
     isFullUrl ||
@@ -866,13 +872,21 @@ export function ClaudeFormFields({
               <HelpTip title={apiFormatLabel}>
                 {t("providerForm.apiFormatHelp", {
                   defaultValue:
-                    "看供应商原生支持哪种协议：Anthropic Messages 原样转发、不转换格式；其余三种由路由转成 Anthropic Messages。",
+                    "看供应商实际支持哪种协议。原生模式原样保留 messages 内的 system 消息；严格模式会经路由把 system 合并到顶层字段，适用于只接受 user / assistant 的网关；其余三种由路由转换格式。",
                 })}
               </HelpTip>
             </div>
             <Select
-              value={apiFormat}
-              onValueChange={onApiFormatChange}
+              value={strictAnthropicMessages ? "anthropic_strict" : apiFormat}
+              onValueChange={(value) => {
+                if (value === "anthropic_strict") {
+                  onApiFormatChange("anthropic");
+                  onStrictAnthropicMessagesChange(true);
+                } else {
+                  onStrictAnthropicMessagesChange(false);
+                  onApiFormatChange(value as ClaudeApiFormat);
+                }
+              }}
               disabled={isCopilotPreset}
             >
               <SelectTrigger id="apiFormat" className="w-full">
@@ -884,6 +898,11 @@ export function ClaudeFormFields({
                 <SelectItem value="anthropic">
                   {t("providerForm.apiFormatAnthropic", {
                     defaultValue: "Anthropic Messages (原生)",
+                  })}
+                </SelectItem>
+                <SelectItem value="anthropic_strict">
+                  {t("providerForm.apiFormatAnthropicStrict", {
+                    defaultValue: "Anthropic Messages（严格兼容，需路由）",
                   })}
                 </SelectItem>
                 <SelectItem value="openai_chat">
@@ -903,9 +922,18 @@ export function ClaudeFormFields({
                 </SelectItem>
               </SelectContent>
             </Select>
-            {directModeFormatNotice && apiFormat !== "anthropic" && (
-              <DirectModeFormatWarning notice={directModeFormatNotice} />
+            {strictAnthropicMessages && (
+              <p className="text-xs leading-relaxed text-fg-2">
+                {t("providerForm.strictAnthropicMessagesNotice", {
+                  defaultValue:
+                    "会通过本地路由把 messages 中的 system 消息合并到顶层 system 字段。该重写可能改变 prompt 前缀；支持内联 system 的供应商请选择原生模式。",
+                })}
+              </p>
             )}
+            {directModeFormatNotice &&
+              (apiFormat !== "anthropic" || strictAnthropicMessages) && (
+                <DirectModeFormatWarning notice={directModeFormatNotice} />
+              )}
           </div>
         )}
       {category !== "cloud_provider" &&
